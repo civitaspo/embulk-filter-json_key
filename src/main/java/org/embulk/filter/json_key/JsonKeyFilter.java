@@ -30,8 +30,8 @@ class JsonKeyFilter
 
     JsonKeyFilter(PluginTask task)
     {
-        this.addKeyFilter = new AddKeyFilter(task.getAddKeyMaps(), task.getNestedKeyDelimiter());
-        this.dropKeyFilter = new DropKeyFilter(task.getDropKeyMaps(), task.getNestedKeyDelimiter());
+        this.addKeyFilter = new AddKeyFilter(task.getAddKeyConfigs(), task.getNestedKeyDelimiter());
+        this.dropKeyFilter = new DropKeyFilter(task.getDropKeyConfigs(), task.getNestedKeyDelimiter());
     }
 
     public String doFilter(String json)

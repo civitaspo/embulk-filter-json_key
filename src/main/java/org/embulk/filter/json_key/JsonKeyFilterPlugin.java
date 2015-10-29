@@ -40,11 +40,11 @@ public class JsonKeyFilterPlugin
 
         @Config("add_keys")
         @ConfigDefault("[]")
-        public List<KeyConfig> getAddKeyMaps();
+        public List<KeyConfig> getAddKeyConfigs();
 
         @Config("drop_keys")
         @ConfigDefault("[]")
-        public List<KeyConfig> getDropKeyMaps();
+        public List<KeyConfig> getDropKeyConfigs();
     }
 
     private final Logger logger = Exec.getLogger(JsonKeyFilterPlugin.class);
