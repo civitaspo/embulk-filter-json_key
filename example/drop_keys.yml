@@ -1,0 +1,26 @@
+in:
+  type: file
+  path_prefix: sandbox/data.tsv
+  parser:
+    type: csv
+    delimiter: "\t"
+    charset: UTF-8
+    newline: CRLF
+    null_string: 'NULL'
+    skip_header_lines: 1
+    comment_line_marker: '#'
+    columns:
+      - {name: json_payload, type: string}
+
+filters:
+  - type: json_key
+    column: json_payload
+    nested_key_delimiter: "."
+    drop_keys:
+      - {key: phone_numbers}
+      - {key: profile.like_words.2}
+      - {key: profile.anniversary.voluptatem}
+
+out:
+  type: stdout
+
