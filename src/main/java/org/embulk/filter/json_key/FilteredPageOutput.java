@@ -13,7 +13,7 @@ import static org.embulk.filter.json_key.JsonKeyFilterPlugin.*;
 /**
  * Created by takahiro.nakayama on 10/28/15.
  */
-public class FilteredPageOutput
+class FilteredPageOutput
         implements PageOutput
 {
     private final Logger logger = Exec.getLogger(FilteredPageOutput.class);

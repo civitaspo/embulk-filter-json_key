@@ -13,7 +13,7 @@ import java.io.IOException;
 /**
  * Created by takahiro.nakayama on 10/28/15.
  */
-public class ColumnVisitorImpl
+class ColumnVisitorImpl
         implements ColumnVisitor
 {
     private final Logger logger = Exec.getLogger(ColumnVisitorImpl.class);

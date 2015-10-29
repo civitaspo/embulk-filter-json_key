@@ -20,7 +20,7 @@ import static org.embulk.filter.json_key.JsonKeyFilterPlugin.KeyConfig;
 /**
  * Created by takahiro.nakayama on 10/28/15.
  */
-public class JsonKeyFilter
+class JsonKeyFilter
 {
     private final Logger logger = Exec.getLogger(JsonKeyFilter.class);
     private final ObjectMapper mapper = new ObjectMapper();
