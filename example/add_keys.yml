@@ -1,0 +1,29 @@
+in:
+  type: file
+  path_prefix: example/data.tsv
+  parser:
+    type: csv
+    delimiter: "\t"
+    charset: UTF-8
+    newline: CRLF
+    null_string: 'NULL'
+    skip_header_lines: 1
+    comment_line_marker: '#'
+    columns:
+      - {name: json_payload, type: string}
+
+filters:
+  - type: json_key
+    column: json_payload
+    nested_key_delimiter: "."
+    add_keys:
+      - {key: add_key1}
+      - {key: add_key2, value: add_value2}
+      - {key: add_key3, value: 3}
+      - {key: add_key4, value: [1,2,3,4]}
+      - {key: add_key5, value: {key1: value, key2: 2, key3: {key: value}}}
+      - {key: profile.add_key6, value: add_value6}
+
+out:
+  type: stdout
+

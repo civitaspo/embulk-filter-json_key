@@ -3,39 +3,54 @@ package org.embulk.filter.json_key;
 import com.google.common.base.Optional;
 import org.embulk.config.Config;
 import org.embulk.config.ConfigDefault;
-import org.embulk.config.ConfigDiff;
 import org.embulk.config.ConfigSource;
 import org.embulk.config.Task;
 import org.embulk.config.TaskSource;
-import org.embulk.spi.Column;
+import org.embulk.spi.Exec;
 import org.embulk.spi.FilterPlugin;
 import org.embulk.spi.PageOutput;
 import org.embulk.spi.Schema;
+import org.slf4j.Logger;
+
+import java.util.List;
 
 public class JsonKeyFilterPlugin
         implements FilterPlugin
 {
+    public interface KeyConfig
+            extends Task
+    {
+        @Config("key")
+        public String getKey();
+
+        @Config("value")
+        @ConfigDefault("null")
+        public Optional<Object> getValue();
+    }
+
     public interface PluginTask
             extends Task
     {
-        // configuration option 1 (required integer)
-        @Config("option1")
-        public int getOption1();
+        @Config("column")
+        public String getColumnName();
 
-        // configuration option 2 (optional string, null is not allowed)
-        @Config("option2")
-        @ConfigDefault("\"myvalue\"")
-        public String getOption2();
+        @Config("nested_key_delimiter")
+        @ConfigDefault("\".\"")
+        public String getNestedKeyDelimiter();
 
-        // configuration option 3 (optional string, null is allowed)
-        @Config("option3")
-        @ConfigDefault("null")
-        public Optional<String> getOption3();
+        @Config("add_keys")
+        @ConfigDefault("[]")
+        public List<KeyConfig> getAddKeyConfigs();
+
+        @Config("drop_keys")
+        @ConfigDefault("[]")
+        public List<KeyConfig> getDropKeyConfigs();
     }
 
+    private final Logger logger = Exec.getLogger(JsonKeyFilterPlugin.class);
+
     @Override
-    public void transaction(ConfigSource config, Schema inputSchema,
-            FilterPlugin.Control control)
+    public void transaction(ConfigSource config, Schema inputSchema, FilterPlugin.Control control)
     {
         PluginTask task = config.loadConfig(PluginTask.class);
 
@@ -45,12 +60,10 @@ public class JsonKeyFilterPlugin
     }
 
     @Override
-    public PageOutput open(TaskSource taskSource, Schema inputSchema,
-            Schema outputSchema, PageOutput output)
+    public PageOutput open(TaskSource taskSource, Schema inputSchema, Schema outputSchema, PageOutput output)
     {
         PluginTask task = taskSource.loadTask(PluginTask.class);
 
-        // Write your code here :)
-        throw new UnsupportedOperationException("JsonKeyFilterPlugin.open method is not implemented yet");
+        return new FilteredPageOutput(task, inputSchema, outputSchema, output);
     }
 }
