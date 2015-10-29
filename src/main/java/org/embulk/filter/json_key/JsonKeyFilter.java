@@ -184,6 +184,10 @@ class JsonKeyFilter
         // if NullNode has come before end of a nested key, return NullNode not EmptyObjectNode.
         private JsonNode dropKey(JsonNode node, List<String> nestedKey)
         {
+            if (node == null) {
+                return null;
+            }
+
             if (node.isObject()) {
                 return dropKeyFromObject(node, nestedKey);
             }
@@ -209,7 +213,9 @@ class JsonKeyFilter
                 String parentKey = nestedKey.get(0);
                 List<String> newNestedKey = nestedKey.subList(1, nestedKey.size());
                 JsonNode newNode = dropKey(object.get(parentKey), newNestedKey);
-                object.set(parentKey, newNode);
+                if (newNode != null) {
+                    object.set(parentKey, newNode);
+                }
                 return object;
             }
         }
@@ -233,7 +239,9 @@ class JsonKeyFilter
                 if (NumberUtils.isNumber(parentIdx)) {
                     int idx = Integer.parseInt(parentIdx);
                     JsonNode newNode = dropKey(object.get(idx), newNestedKey);
-                    object.set(idx, newNode);
+                    if (newNode != null) {
+                        object.set(idx, newNode);
+                    }
                 }
                 return object;
             }
