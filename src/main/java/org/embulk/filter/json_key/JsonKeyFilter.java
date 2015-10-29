@@ -102,6 +102,10 @@ class JsonKeyFilter
         // TODO: addKey is overwriting existing values.
         private JsonNode addKey(JsonNode node, List<String> nestedKey, JsonNode value)
         {
+            if (node == null) {
+                return null;
+            }
+
             if (node.isObject()) {
                 return addKeyToObject(node, nestedKey, value);
             }
@@ -131,7 +135,9 @@ class JsonKeyFilter
                 String parentKey = nestedKey.get(0);
                 List<String> newNestedKey = nestedKey.subList(1, nestedKey.size());
                 JsonNode newNode = addKey(object.get(parentKey), newNestedKey, value);
-                object.set(parentKey, newNode);
+                if (newNode != null) {
+                    object.set(parentKey, newNode);
+                }
                 return object;
             }
         }
@@ -156,7 +162,9 @@ class JsonKeyFilter
                 if (NumberUtils.isNumber(parentIdx)) {
                     int idx = Integer.parseInt(parentIdx);
                     JsonNode newNode = addKey(object.get(idx), newNestedKey, value);
-                    object.set(idx, newNode);
+                    if (newNode != null) {
+                        object.set(idx, newNode);
+                    }
                 }
                 return object;
             }
@@ -184,6 +192,10 @@ class JsonKeyFilter
         // if NullNode has come before end of a nested key, return NullNode not EmptyObjectNode.
         private JsonNode dropKey(JsonNode node, List<String> nestedKey)
         {
+            if (node == null) {
+                return null;
+            }
+
             if (node.isObject()) {
                 return dropKeyFromObject(node, nestedKey);
             }
@@ -209,7 +221,9 @@ class JsonKeyFilter
                 String parentKey = nestedKey.get(0);
                 List<String> newNestedKey = nestedKey.subList(1, nestedKey.size());
                 JsonNode newNode = dropKey(object.get(parentKey), newNestedKey);
-                object.set(parentKey, newNode);
+                if (newNode != null) {
+                    object.set(parentKey, newNode);
+                }
                 return object;
             }
         }
@@ -233,7 +247,9 @@ class JsonKeyFilter
                 if (NumberUtils.isNumber(parentIdx)) {
                     int idx = Integer.parseInt(parentIdx);
                     JsonNode newNode = dropKey(object.get(idx), newNestedKey);
-                    object.set(idx, newNode);
+                    if (newNode != null) {
+                        object.set(idx, newNode);
+                    }
                 }
                 return object;
             }
