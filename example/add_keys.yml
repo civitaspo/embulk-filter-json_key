@@ -1,6 +1,6 @@
 in:
   type: file
-  path_prefix: sandbox/data.tsv
+  path_prefix: example/data.tsv
   parser:
     type: csv
     delimiter: "\t"
