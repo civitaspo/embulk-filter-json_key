@@ -5,4 +5,5 @@ jdk:
   - oraclejdk8
 script:
   - ./gradlew test
-
+after_success:
+  - ./gradlew jacocoTestReport coveralls
