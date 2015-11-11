@@ -1,6 +1,7 @@
 # Json Key filter plugin for Embulk
 
 [![Build Status](https://travis-ci.org/civitaspo/embulk-filter-json_key.svg)](https://travis-ci.org/civitaspo/embulk-filter-json_key)
+[![Coverage Status](https://coveralls.io/repos/civitaspo/embulk-filter-json_key/badge.svg?branch=master&service=github)](https://coveralls.io/github/civitaspo/embulk-filter-json_key?branch=master)
 
 Filtering keys from JSON objects.
 
