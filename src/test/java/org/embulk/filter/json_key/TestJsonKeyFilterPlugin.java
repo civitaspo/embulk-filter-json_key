@@ -1,18 +1,24 @@
 package org.embulk.filter.json_key;
 
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.google.common.base.Optional;
+import com.google.common.base.Throwables;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableMap;
 import org.embulk.EmbulkTestRuntime;
 import org.embulk.config.ConfigException;
 import org.embulk.config.ConfigLoader;
 import org.embulk.config.ConfigSource;
-import org.embulk.config.DataSource;
+import org.embulk.config.TaskSource;
 import org.embulk.filter.json_key.JsonKeyFilterPlugin.PluginTask;
-import org.embulk.plugin.MockPluginSource;
 import org.embulk.spi.Exec;
+import org.embulk.spi.FilterPlugin;
+import org.embulk.spi.Page;
+import org.embulk.spi.PageOutput;
+import org.embulk.spi.PageReader;
+import org.embulk.spi.PageTestUtils;
+import org.embulk.spi.Schema;
+import org.embulk.spi.TestPageBuilderReader;
+import org.embulk.spi.TestPageBuilderReader.MockPageOutput;
 import org.json.JSONException;
 import org.junit.Before;
 import org.junit.Ignore;
@@ -22,9 +28,9 @@ import org.junit.rules.ExpectedException;
 import org.skyscreamer.jsonassert.JSONAssert;
 
 import java.io.IOException;
-import java.util.List;
-import java.util.Map;
 
+import static org.embulk.spi.FilterPlugin.*;
+import static org.embulk.spi.type.Types.STRING;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertTrue;
 
@@ -36,6 +42,9 @@ public class TestJsonKeyFilterPlugin
     @Rule
     public ExpectedException exception = ExpectedException.none();
 
+    private final Schema schema = Schema.builder()
+            .add("_c0", STRING)
+            .build();
     private JsonKeyFilterPlugin filter;
 
     @Before
@@ -49,6 +58,37 @@ public class TestJsonKeyFilterPlugin
         // `column` is required.
         return Exec.newConfigSource().set("column", "_c0");
     }
+
+    private void assertJsonMy(TaskSource taskSource, String expected, String baseData)
+    {
+        MockPageOutput mockPageOutput = new MockPageOutput();
+        PageOutput pageOutput = filter.open(taskSource,
+                                            schema,
+                                            schema,
+                                            mockPageOutput);
+
+        for (Page page : PageTestUtils.buildPage(runtime.getBufferAllocator(),
+                                                 schema,
+                                                 baseData)) {
+            pageOutput.add(page);
+        }
+
+        pageOutput.finish();
+        pageOutput.close();
+
+        PageReader pageReader = new PageReader(schema);
+
+        for (Page page : mockPageOutput.pages) {
+            pageReader.setPage(page);
+            try {
+                JSONAssert.assertEquals(expected, pageReader.getString(schema.getColumn(0)), true);
+            }
+            catch (JSONException e) {
+                throw Throwables.propagate(e);
+            }
+        }
+    }
+
 
     @Test
     public void testConfigRequiredValues()
@@ -74,13 +114,6 @@ public class TestJsonKeyFilterPlugin
     public void testConfigLoadYamlObjectAsJsonObject()
             throws IOException, JSONException
     {
-        String jsonData = "{\"c1\":\"value\"}";
-        /*
-        {
-          "c1": "value"
-        }
-        */
-
         String configYaml = "" +
                 "type: json_key\n" +
                 "column: _c0\n" +
@@ -97,43 +130,55 @@ public class TestJsonKeyFilterPlugin
         ConfigLoader loader = new ConfigLoader(Exec.getModelManager());
         ConfigSource config = loader.fromYamlString(configYaml);
 
-        PluginTask task = config.loadConfig(PluginTask.class);
-        JsonKeyFilter filter = new JsonKeyFilter(task);
-
-        String expected = "{\"c1\":\"value\",\"added1\":{},\"added2\":{\"nested\":\"str\"},\"added3\":{\"nested\":1}," +
-                "\"added4\":{\"nested\":2.2},\"added5\":{\"nested\":null},\"added6\":{\"nested\":true}," +
-                "\"added7\":{\"nested\":{}},\"added8\":{\"nested\":{\"nested\":\"str\"}}}}";
-        /*
+        filter.transaction(config, schema, new Control()
         {
-          "c1": "value",
-          "added1": {
-          },
-          "added2": {
-            "nested": "str"
-          },
-          "added3": {
-            "nested": 1
-          },
-          "added4": {
-            "nested": 2.2
-          },
-          "added5": {
-            "nested": null
-          },
-          "added6": {
-            "nested": true
-          },
-          "added7": {
-            "nested": {}
-          },
-          "added8": {
-            "nested": {
-              "nested": "str"
+            @Override
+            public void run(TaskSource taskSource, Schema outputSchema)
+            {
+                String jsonData = "{\"c1\":\"value\"}";
+                /*
+                {
+                  "c1": "value"
+                }
+                */
+
+                String expected = "{\"c1\":\"value\",\"added1\":{},\"added2\":{\"nested\":\"str\"},\"added3\":{\"nested\":1}," +
+                        "\"added4\":{\"nested\":2.2},\"added5\":{\"nested\":null},\"added6\":{\"nested\":true}," +
+                        "\"added7\":{\"nested\":{}},\"added8\":{\"nested\":{\"nested\":\"str\"}}}}";
+                /*
+                {
+                  "c1": "value",
+                  "added1": {
+                  },
+                  "added2": {
+                    "nested": "str"
+                  },
+                  "added3": {
+                    "nested": 1
+                  },
+                  "added4": {
+                    "nested": 2.2
+                  },
+                  "added5": {
+                    "nested": null
+                  },
+                  "added6": {
+                    "nested": true
+                  },
+                  "added7": {
+                    "nested": {}
+                  },
+                  "added8": {
+                    "nested": {
+                      "nested": "str"
+                    }
+                  }
+                }
+                */
+
+                assertJsonMy(taskSource, expected, jsonData);
             }
-          }
-        }
-        */
-        JSONAssert.assertEquals(expected, filter.doFilter(jsonData), true);
+        });
     }
 
     /*
@@ -153,12 +198,6 @@ public class TestJsonKeyFilterPlugin
     public void testDoFilterAddNotExistingFlattenedKey()
             throws IOException, JSONException
     {
-        String jsonData = "{\"c1\":\"value\"}";
-        /*
-        {
-          "c1": "value"
-        }
-        */
         ImmutableList.Builder<Object> builder = ImmutableList.builder();
         builder.add(ImmutableMap.of("key", "added1", "value", Optional.of("str")));
         builder.add(ImmutableMap.of("key", "added2", "value", Optional.of(1)));
@@ -169,21 +208,32 @@ public class TestJsonKeyFilterPlugin
         ConfigSource config = getDefaultConfigSource();
         config.set("add_keys", builder.build());
 
-        PluginTask task = config.loadConfig(PluginTask.class);
-        JsonKeyFilter filter = new JsonKeyFilter(task);
-
-        String expected = "{\"c1\":\"value\",\"added1\":\"str\",\"added2\":1,\"added3\":2.2,\"added4\":null,\"added5\":true}";
-        /*
+        filter.transaction(config, schema, new Control()
         {
-          "c1": "value",
-          "added1": "str",
-          "added2": 1,
-          "added3": 2.2,
-          "added4": null,
-          "added5": true
-        }
-        */
-        JSONAssert.assertEquals(expected, filter.doFilter(jsonData), true);;
+            @Override
+            public void run(TaskSource taskSource, Schema outputSchema)
+            {
+                String jsonData = "{\"c1\":\"value\"}";
+                /*
+                {
+                  "c1": "value"
+                }
+                */
+
+                String expected = "{\"c1\":\"value\",\"added1\":\"str\",\"added2\":1,\"added3\":2.2,\"added4\":null,\"added5\":true}";
+                /*
+                {
+                  "c1": "value",
+                  "added1": "str",
+                  "added2": 1,
+                  "added3": 2.2,
+                  "added4": null,
+                  "added5": true
+                }
+                */
+                assertJsonMy(taskSource, expected, jsonData);
+            }
+        });
     }
 
 
@@ -198,7 +248,6 @@ public class TestJsonKeyFilterPlugin
     public void testDoFilterAddNotExistingSingleNestedKey()
             throws IOException, JSONException
     {
-        String jsonData = "{\"c1\":\"value\"}";
         ImmutableList.Builder<Object> builder = ImmutableList.builder();
         builder.add(ImmutableMap.of("key", "nested1.added1", "value", Optional.of("str")));
         builder.add(ImmutableMap.of("key", "nested1.added2", "value", Optional.of(1)));
@@ -216,34 +265,39 @@ public class TestJsonKeyFilterPlugin
         ConfigSource config = getDefaultConfigSource();
         config.set("add_keys", builder.build());
 
-        PluginTask task = config.loadConfig(PluginTask.class);
-        JsonKeyFilter filter = new JsonKeyFilter(task);
-
-        String expected = "{\"c1\":\"value\",\"nested1\":{\"added1\":\"str\",\"added2\":1,\"added3\":2.2,\"added4\":null,\"added5\":true}," +
-                "\"nested2\":[null,\"str\",1,2.2,null,true,{},[]]}";
-        /*
+        filter.transaction(config, schema, new Control()
         {
-          "c1": "value",
-          "nested1": {
-            "added1": "str",
-            "added2": 1,
-            "added3": 2.2,
-            "added4": null,
-            "added4": true
-          },
-          "nested2":[
-            null,
-            "str",
-            1,
-            2.2,
-            null,
-            true,
-            {},
-            []
-          ]
-        }
-        */
-        JSONAssert.assertEquals(expected, filter.doFilter(jsonData), true);;
+            @Override
+            public void run(TaskSource taskSource, Schema outputSchema)
+            {
+                String jsonData = "{\"c1\":\"value\"}";
+
+                String expected = "{\"c1\":\"value\",\"nested1\":{\"added1\":\"str\",\"added2\":1,\"added3\":2.2,\"added4\":null,\"added5\":true}," + "\"nested2\":[null,\"str\",1,2.2,null,true,{},[]]}";
+                /*
+                {
+                  "c1": "value",
+                  "nested1": {
+                    "added1": "str",
+                    "added2": 1,
+                    "added3": 2.2,
+                    "added4": null,
+                    "added4": true
+                  },
+                  "nested2":[
+                    null,
+                    "str",
+                    1,
+                    2.2,
+                    null,
+                    true,
+                    {},
+                    []
+                  ]
+                }
+                */
+                assertJsonMy(taskSource, jsonData, expected);
+            }
+        });
     }
 
     /*
@@ -257,7 +311,6 @@ public class TestJsonKeyFilterPlugin
     public void testDoFilterAddNotExistingDoubleNestedKey()
             throws IOException, JSONException
     {
-        String jsonData = "{\"c1\":\"value\"}";
         ImmutableList.Builder<Object> builder = ImmutableList.builder();
         builder.add(ImmutableMap.of("key", "nested1.nested2.added1", "value", Optional.of("str")));
         builder.add(ImmutableMap.of("key", "nested1.nested2.added2", "value", Optional.of(1)));
@@ -270,35 +323,40 @@ public class TestJsonKeyFilterPlugin
         ConfigSource config = getDefaultConfigSource();
         config.set("add_keys", builder.build());
 
-        PluginTask task = config.loadConfig(PluginTask.class);
-        JsonKeyFilter filter = new JsonKeyFilter(task);
-
-        String expected = "{\"c1\":\"value\",\"nested1\":{\"nested2\":{" +
-                "\"added1\":\"str\",\"added2\":1,\"added3\":2.2,\"added4\":null,\"added5\":true" +
-                ",\"nested3\": [null,null,null,null,null,true]}}}";
-        /*
+        filter.transaction(config, schema, new Control()
         {
-          "c1": "value",
-          "nested1": {
-            "nested2": {
-              "added1": "str",
-              "added2": 1,
-              "added3": 2.2,
-              "added4": null,
-              "added4": true
-            },
-            "nested3": [
-              null,
-              null,
-              null,
-              null,
-              null,
-              true
-            ]
-          }
-        }
-        */
-        JSONAssert.assertEquals(expected, filter.doFilter(jsonData), true);;
+            @Override
+            public void run(TaskSource taskSource, Schema outputSchema)
+            {
+                String jsonData = "{\"c1\":\"value\"}";
+                String expected = "{\"c1\":\"value\",\"nested1\":{\"nested2\":{" +
+                        "\"added1\":\"str\",\"added2\":1,\"added3\":2.2,\"added4\":null,\"added5\":true" +
+                        ",\"nested3\": [null,null,null,null,null,true]}}}";
+                /*
+                {
+                  "c1": "value",
+                  "nested1": {
+                    "nested2": {
+                      "added1": "str",
+                      "added2": 1,
+                      "added3": 2.2,
+                      "added4": null,
+                      "added4": true
+                    },
+                    "nested3": [
+                      null,
+                      null,
+                      null,
+                      null,
+                      null,
+                      true
+                    ]
+                  }
+                }
+                */
+                assertJsonMy(taskSource, expected, jsonData);
+            }
+        });
     }
 
     /*
@@ -312,7 +370,6 @@ public class TestJsonKeyFilterPlugin
     public void testDoFilterAddExistingFlattenedKey()
             throws IOException, JSONException
     {
-        String jsonData = "{\"c1\":\"value\"}";
         ImmutableList.Builder<Object> builder = ImmutableList.builder();
         builder.add(ImmutableMap.of("key", "c1", "value", Optional.of("str")));
         builder.add(ImmutableMap.of("key", "added1", "value", Optional.of(1)));
@@ -321,17 +378,22 @@ public class TestJsonKeyFilterPlugin
         ConfigSource config = getDefaultConfigSource();
         config.set("add_keys", builder.build());
 
-        PluginTask task = config.loadConfig(PluginTask.class);
-        JsonKeyFilter filter = new JsonKeyFilter(task);
-
-        String expected = "{\"c1\":\"value\",\"added1\":2.2}";
-        /*
+        filter.transaction(config, schema, new Control()
         {
-          "c1": "value",
-          "added1": 2.2
-        }
-        */
-        JSONAssert.assertEquals(expected, filter.doFilter(jsonData), true);;
+            @Override
+            public void run(TaskSource taskSource, Schema outputSchema)
+            {
+                String jsonData = "{\"c1\":\"value\"}";
+                String expected = "{\"c1\":\"value\",\"added1\":2.2}";
+                /*
+                {
+                  "c1": "value",
+                  "added1": 2.2
+                }
+                */
+                assertJsonMy(taskSource, expected, jsonData);
+            }
+        });
     }
 
     /*
@@ -345,31 +407,6 @@ public class TestJsonKeyFilterPlugin
     public void testDoFilterAddExistingSingleNestedKey()
             throws IOException, JSONException
     {
-        String jsonData = "{\"c1\":\"value\",\"c2\":\"value\"," +
-                "\"c3\":{\"nested\":\"value\"},\"c4\":{\"nested\":\"value\"}," +
-                "\"c5\":{\"nested\":{\"nested\":\"value\"}},\"c6\":{\"nested\":{\"nested\":\"value\"}}}";
-        /*
-        {
-          "c1": "value",
-          "c2": "value",
-          "c3": {
-            "nested": "value"
-          },
-          "c4": {
-            "nested": "value"
-          },
-          "c5": {
-            "nested": {
-              "nested": "value"
-            }
-          },
-          "c6": {
-            "nested": {
-              "nested": "value"
-            }
-          }
-        }
-         */
         ImmutableList.Builder<Object> builder = ImmutableList.builder();
         builder.add(ImmutableMap.of("key", "c1.nested", "value", Optional.of(1)));
         builder.add(ImmutableMap.of("key", "c2.nested", "value", Optional.of(1), "overwrite", true));
@@ -381,35 +418,64 @@ public class TestJsonKeyFilterPlugin
         ConfigSource config = getDefaultConfigSource();
         config.set("add_keys", builder.build());
 
-        PluginTask task = config.loadConfig(PluginTask.class);
-        JsonKeyFilter filter = new JsonKeyFilter(task);
-
-        String expected = "{\"c1\":\"value\",\"c2\":{\"nested\":1}," +
-                "\"c3\":{\"nested\":\"value\"},\"c4\":{\"nested\":1}," +
-                "\"c5\":{\"nested\":{\"nested\":\"value\"}},\"c6\":{\"nested\":1}}";
-        /*
+        filter.transaction(config, schema, new Control()
         {
-          "c1":"value",
-          "c2":{
-            "nested":1
-          },
-          "c3":{
-            "nested":"value"
-          },
-          "c4":{
-            "nested":1
-          },
-          "c5":{
-            "nested":{
-              "nested":"value"
+            @Override
+            public void run(TaskSource taskSource, Schema outputSchema)
+            {
+                String jsonData = "{\"c1\":\"value\",\"c2\":\"value\"," +
+                        "\"c3\":{\"nested\":\"value\"},\"c4\":{\"nested\":\"value\"}," +
+                        "\"c5\":{\"nested\":{\"nested\":\"value\"}},\"c6\":{\"nested\":{\"nested\":\"value\"}}}";
+                /*
+                {
+                  "c1": "value",
+                  "c2": "value",
+                  "c3": {
+                    "nested": "value"
+                  },
+                  "c4": {
+                    "nested": "value"
+                  },
+                  "c5": {
+                    "nested": {
+                      "nested": "value"
+                    }
+                  },
+                  "c6": {
+                    "nested": {
+                      "nested": "value"
+                    }
+                  }
+                }
+                 */
+                String expected = "{\"c1\":\"value\",\"c2\":{\"nested\":1}," +
+                        "\"c3\":{\"nested\":\"value\"},\"c4\":{\"nested\":1}," +
+                        "\"c5\":{\"nested\":{\"nested\":\"value\"}},\"c6\":{\"nested\":1}}";
+                /*
+                {
+                  "c1":"value",
+                  "c2":{
+                    "nested":1
+                  },
+                  "c3":{
+                    "nested":"value"
+                  },
+                  "c4":{
+                    "nested":1
+                  },
+                  "c5":{
+                    "nested":{
+                      "nested":"value"
+                    }
+                  },
+                  "c6":{
+                    "nested":1
+                  }
+                }
+                */
+                assertJsonMy(taskSource, expected, jsonData);
             }
-          },
-          "c6":{
-            "nested":1
-          }
-        }
-        */
-        JSONAssert.assertEquals(expected, filter.doFilter(jsonData), true);;
+        });
     }
 
     /*
@@ -423,31 +489,6 @@ public class TestJsonKeyFilterPlugin
     public void testDoFilterAddExistingDoubleNestedKey()
             throws IOException, JSONException
     {
-        String jsonData = "{\"c1\":\"value\",\"c2\":\"value\"," +
-                "\"c3\":{\"nested\":\"value\"},\"c4\":{\"nested\":\"value\"}," +
-                "\"c5\":{\"nested\":{\"nested\":\"value\"}},\"c6\":{\"nested\":{\"nested\":\"value\"}}}";
-        /*
-        {
-          "c1": "value",
-          "c2": "value",
-          "c3": {
-            "nested": "value"
-          },
-          "c4": {
-            "nested": "value"
-          },
-          "c5": {
-            "nested": {
-              "nested": "value"
-            }
-          },
-          "c6": {
-            "nested": {
-              "nested": "value"
-            }
-          }
-        }
-         */
         ImmutableList.Builder<Object> builder = ImmutableList.builder();
         builder.add(ImmutableMap.of("key", "c1.nested.nested", "value", Optional.of(1)));
         builder.add(ImmutableMap.of("key", "c2.nested.nested", "value", Optional.of(1), "overwrite", true));
@@ -459,41 +500,70 @@ public class TestJsonKeyFilterPlugin
         ConfigSource config = getDefaultConfigSource();
         config.set("add_keys", builder.build());
 
-        PluginTask task = config.loadConfig(PluginTask.class);
-        JsonKeyFilter filter = new JsonKeyFilter(task);
-
-        String expected = "{\"c1\":\"value\",\"c2\":{\"nested\":{\"nested\":1}}," +
-                "\"c3\":{\"nested\":\"value\"},\"c4\":{\"nested\":{\"nested\":1}}," +
-                "\"c5\":{\"nested\":{\"nested\":\"value\"}},\"c6\":{\"nested\":{\"nested\":1}}}";
-        /*
+        filter.transaction(config, schema, new Control()
         {
-          "c1":"value",
-          "c2":{
-            "nested":{
-              "nested": 1
+            @Override
+            public void run(TaskSource taskSource, Schema outputSchema)
+            {
+                String jsonData = "{\"c1\":\"value\",\"c2\":\"value\"," +
+                        "\"c3\":{\"nested\":\"value\"},\"c4\":{\"nested\":\"value\"}," +
+                        "\"c5\":{\"nested\":{\"nested\":\"value\"}},\"c6\":{\"nested\":{\"nested\":\"value\"}}}";
+                /*
+                {
+                  "c1": "value",
+                  "c2": "value",
+                  "c3": {
+                    "nested": "value"
+                  },
+                  "c4": {
+                    "nested": "value"
+                  },
+                  "c5": {
+                    "nested": {
+                      "nested": "value"
+                    }
+                  },
+                  "c6": {
+                    "nested": {
+                      "nested": "value"
+                    }
+                  }
+                }
+                 */
+                String expected = "{\"c1\":\"value\",\"c2\":{\"nested\":{\"nested\":1}}," +
+                        "\"c3\":{\"nested\":\"value\"},\"c4\":{\"nested\":{\"nested\":1}}," +
+                        "\"c5\":{\"nested\":{\"nested\":\"value\"}},\"c6\":{\"nested\":{\"nested\":1}}}";
+                /*
+                {
+                  "c1":"value",
+                  "c2":{
+                    "nested":{
+                      "nested": 1
+                    }
+                  },
+                  "c3":{
+                    "nested":"value"
+                  },
+                  "c4":{
+                    "nested":{
+                      "nested": 1
+                    }
+                  },
+                  "c5":{
+                    "nested":{
+                      "nested":"value"
+                    }
+                  },
+                  "c6":{
+                    "nested":{
+                      "nested": 1
+                    }
+                  }
+                }
+                */
+                assertJsonMy(taskSource, expected, jsonData);
             }
-          },
-          "c3":{
-            "nested":"value"
-          },
-          "c4":{
-            "nested":{
-              "nested": 1
-            }
-          },
-          "c5":{
-            "nested":{
-              "nested":"value"
-            }
-          },
-          "c6":{
-            "nested":{
-              "nested": 1
-            }
-          }
-        }
-        */
-        JSONAssert.assertEquals(expected, filter.doFilter(jsonData), true);;
+        });
     }
 
     /*
@@ -506,26 +576,30 @@ public class TestJsonKeyFilterPlugin
     public void testDoFilterDropNotExistingFlattenedKey()
             throws IOException, JSONException
     {
-        String jsonData = "{}";
-        /*
-        {
-        }
-         */
         ImmutableList.Builder<Object> builder = ImmutableList.builder();
         builder.add(ImmutableMap.of("key", "c1"));
 
         ConfigSource config = getDefaultConfigSource();
         config.set("drop_keys", builder.build());
 
-        PluginTask task = config.loadConfig(PluginTask.class);
-        JsonKeyFilter filter = new JsonKeyFilter(task);
-
-        String expected = "{}";
-        /*
+        filter.transaction(config, schema, new Control()
         {
-        }
-        */
-        JSONAssert.assertEquals(expected, filter.doFilter(jsonData), true);;
+            @Override
+            public void run(TaskSource taskSource, Schema outputSchema)
+            {
+                String jsonData = "{}";
+                /*
+                {
+                }
+                 */
+                String expected = "{}";
+                /*
+                {
+                }
+                */
+                assertJsonMy(taskSource, expected, jsonData);
+            }
+        });
     }
 
     /*
@@ -538,26 +612,30 @@ public class TestJsonKeyFilterPlugin
     public void testDoFilterDropNotExistingSingleNestedKey()
             throws IOException, JSONException
     {
-        String jsonData = "{}";
-        /*
-        {
-        }
-         */
         ImmutableList.Builder<Object> builder = ImmutableList.builder();
         builder.add(ImmutableMap.of("key", "c1.nested"));
 
         ConfigSource config = getDefaultConfigSource();
         config.set("drop_keys", builder.build());
 
-        PluginTask task = config.loadConfig(PluginTask.class);
-        JsonKeyFilter filter = new JsonKeyFilter(task);
-
-        String expected = "{}";
-        /*
+        filter.transaction(config, schema, new Control()
         {
-        }
-        */
-        JSONAssert.assertEquals(expected, filter.doFilter(jsonData), true);;
+            @Override
+            public void run(TaskSource taskSource, Schema outputSchema)
+            {
+                String jsonData = "{}";
+                /*
+                {
+                }
+                 */
+                String expected = "{}";
+                /*
+                {
+                }
+                */
+                assertJsonMy(taskSource, expected, jsonData);
+            }
+        });
     }
 
     /*
@@ -570,26 +648,30 @@ Case:
     public void testDoFilterDropNotExistingDoubleNestedKey()
             throws IOException, JSONException
     {
-        String jsonData = "{}";
-        /*
-        {
-        }
-         */
         ImmutableList.Builder<Object> builder = ImmutableList.builder();
         builder.add(ImmutableMap.of("key", "c1.nested.nested"));
 
         ConfigSource config = getDefaultConfigSource();
         config.set("drop_keys", builder.build());
 
-        PluginTask task = config.loadConfig(PluginTask.class);
-        JsonKeyFilter filter = new JsonKeyFilter(task);
-
-        String expected = "{}";
-        /*
+        filter.transaction(config, schema, new Control()
         {
-        }
-        */
-        JSONAssert.assertEquals(expected, filter.doFilter(jsonData), true);;
+            @Override
+            public void run(TaskSource taskSource, Schema outputSchema)
+            {
+                String jsonData = "{}";
+                /*
+                {
+                }
+                 */
+                String expected = "{}";
+                /*
+                {
+                }
+                */
+                assertJsonMy(taskSource, expected, jsonData);
+            }
+        });
     }
 
     /*
@@ -602,24 +684,6 @@ Case:
     public void testDoFilterDropExistingFlattenedKey()
             throws IOException, JSONException
     {
-        String jsonData = "{\"c1\":\"value\",\"c2\":\"value\"," +
-                "\"c3\":{\"nested\":\"value\"},\"c4\":{\"nested\":\"value\"}," +
-                "\"c5\":{\"nested\":{\"nested\":\"value\"}},\"c6\":{\"nested\":{\"nested\":\"value\"}}}";
-        /*
-        {
-          "c1": "value",
-          "c2": null,
-          "c3": {},
-          "c4": {
-            "nested": "value"
-          },
-          "c5": {
-            "nested": {
-              "nested": "value"
-            }
-          }
-        }
-         */
         ImmutableList.Builder<Object> builder = ImmutableList.builder();
         builder.add(ImmutableMap.of("key", "c1"));
         builder.add(ImmutableMap.of("key", "c2"));
@@ -631,15 +695,39 @@ Case:
         ConfigSource config = getDefaultConfigSource();
         config.set("drop_keys", builder.build());
 
-        PluginTask task = config.loadConfig(PluginTask.class);
-        JsonKeyFilter filter = new JsonKeyFilter(task);
-
-        String expected = "{}";
-        /*
+        filter.transaction(config, schema, new Control()
         {
-        }
-        */
-        JSONAssert.assertEquals(expected, filter.doFilter(jsonData), true);;
+            @Override
+            public void run(TaskSource taskSource, Schema outputSchema)
+            {
+                String jsonData = "{\"c1\":\"value\",\"c2\":\"value\"," +
+                        "\"c3\":{\"nested\":\"value\"},\"c4\":{\"nested\":\"value\"}," +
+                        "\"c5\":{\"nested\":{\"nested\":\"value\"}},\"c6\":{\"nested\":{\"nested\":\"value\"}}}";
+                /*
+                {
+                  "c1": "value",
+                  "c2": null,
+                  "c3": {},
+                  "c4": {
+                    "nested": "value"
+                  },
+                  "c5": {
+                    "nested": {
+                      "nested": "value"
+                    }
+                  }
+                }
+                 */
+
+                String expected = "{}";
+                /*
+                {
+                }
+                */
+
+                assertJsonMy(taskSource, expected, jsonData);
+            }
+        });
     }
 
     /*
@@ -652,35 +740,6 @@ Case:
     public void testDoFilterDropExistingSingleNestedKey()
             throws IOException, JSONException
     {
-        String jsonData = "{\"c1\":\"value\",\"c2\":null," +
-                "\"c3\":{},\"c4\":{\"nested\":\"value\"}," +
-                "\"c5\":{\"nested\":null},\"c6\":{\"nested\":\"value\",\"nested2\":\"value\"}," +
-                "\"c7\":{\"nested\":{}},\"c8\":{\"nested\":{\"nested\":\"value\"}}}";
-        /*
-        {
-          "c1": "value",
-          "c2": null,
-          "c3": {},
-          "c4": {
-            "nested": "value"
-          },
-          "c5": {
-            "nested": null
-          },
-          "c6": {
-            "nested": "value"
-            "nested2": "value"
-          },
-          "c7": {
-            "nested": {}
-          },
-          "c8": {
-            "nested": {
-              "nested": "value"
-            }
-          }
-        }
-         */
         ImmutableList.Builder<Object> builder = ImmutableList.builder();
         builder.add(ImmutableMap.of("key", "c1.nested"));
         builder.add(ImmutableMap.of("key", "c2.nested"));
@@ -695,30 +754,64 @@ Case:
         ConfigSource config = getDefaultConfigSource();
         config.set("drop_keys", builder.build());
 
-        PluginTask task = config.loadConfig(PluginTask.class);
-        JsonKeyFilter filter = new JsonKeyFilter(task);
-
-        String expected = "{\"c1\":\"value\",\"c2\":null,\"c3\":{},\"c4\":{}," +
-                "\"c5\":{},\"c6\":{\"nested2\":\"value\"},\"c7\":{},\"c8\":{}}";
-        /*
+        filter.transaction(config, schema, new Control()
         {
-          "c1": "value",
-          "c2": null,
-          "c3": {},
-          "c4": {
-          },
-          "c5": {
-          },
-          "c6": {
-            "nested2": "value"
-          },
-          "c7": {
-          },
-          "c8": {
-          }
-        }
-        */
-        JSONAssert.assertEquals(expected, filter.doFilter(jsonData), true);
+            @Override
+            public void run(TaskSource taskSource, Schema outputSchema)
+            {
+                String jsonData = "{\"c1\":\"value\",\"c2\":null," +
+                        "\"c3\":{},\"c4\":{\"nested\":\"value\"}," +
+                        "\"c5\":{\"nested\":null},\"c6\":{\"nested\":\"value\",\"nested2\":\"value\"}," +
+                        "\"c7\":{\"nested\":{}},\"c8\":{\"nested\":{\"nested\":\"value\"}}}";
+                /*
+                {
+                  "c1": "value",
+                  "c2": null,
+                  "c3": {},
+                  "c4": {
+                    "nested": "value"
+                  },
+                  "c5": {
+                    "nested": null
+                  },
+                  "c6": {
+                    "nested": "value"
+                    "nested2": "value"
+                  },
+                  "c7": {
+                    "nested": {}
+                  },
+                  "c8": {
+                    "nested": {
+                      "nested": "value"
+                    }
+                  }
+                }
+                 */
+
+                String expected = "{\"c1\":\"value\",\"c2\":null,\"c3\":{},\"c4\":{}," +
+                        "\"c5\":{},\"c6\":{\"nested2\":\"value\"},\"c7\":{},\"c8\":{}}";
+                /*
+                {
+                  "c1": "value",
+                  "c2": null,
+                  "c3": {},
+                  "c4": {
+                  },
+                  "c5": {
+                  },
+                  "c6": {
+                    "nested2": "value"
+                  },
+                  "c7": {
+                  },
+                  "c8": {
+                  }
+                }
+                */
+                assertJsonMy(taskSource, expected, jsonData);
+            }
+        });
     }
 
     /*
@@ -731,55 +824,6 @@ Case:
     public void testDoFilterDropExistingDoubleNestedKey()
             throws IOException, JSONException
     {
-        String jsonData = "{\"c1\":\"value\",\"c2\":null,\"c3\":{}," +
-                "\"c4\":{\"nested\":\"value\"},\"c5\":{\"nested\":null}," +
-                "\"c6\":{\"nested\":{}},\"c7\":{\"nested\":{\"nested\":null}}," +
-                "\"c8\":{\"nested\":{\"nested\":\"value\"}},\"c9\":{\"nested\":{\"nested\":\"value\",\"nested2\":\"value\"}}," +
-                "\"c10\":{\"nested\":{\"nested\":{}}},\"c11\":{\"nested\":{\"nested\":{\"nested\":{}}}}}";
-        /*
-        {
-          "c1": "value",
-          "c2": null,
-          "c3": {},
-          "c4": {
-            "nested": "value"
-          },
-          "c5": {
-            "nested": null
-          },
-          "c6": {
-            "nested": {}
-          },
-          "c7": {
-            "nested": {
-              "nested": null
-            }
-          },
-          "c8": {
-            "nested": {
-              "nested": "value"
-            }
-          },
-          "c9": {
-            "nested": {
-              "nested": "value",
-              "nested2": "value"
-            }
-          },
-          "c10": {
-            "nested": {
-              "nested": {}
-            }
-          },
-          "c11": {
-            "nested": {
-              "nested": {
-                "nested": {}
-              }
-            }
-          }
-        }
-         */
         ImmutableList.Builder<Object> builder = ImmutableList.builder();
         builder.add(ImmutableMap.of("key", "c1.nested.nested"));
         builder.add(ImmutableMap.of("key", "c2.nested.nested"));
@@ -797,51 +841,104 @@ Case:
         ConfigSource config = getDefaultConfigSource();
         config.set("drop_keys", builder.build());
 
-        PluginTask task = config.loadConfig(PluginTask.class);
-        JsonKeyFilter filter = new JsonKeyFilter(task);
-
-        String expected = "{\"c1\":\"value\",\"c2\":null,\"c3\":{}," +
-                "\"c4\":{\"nested\":\"value\"},\"c5\":{\"nested\":null}," +
-                "\"c6\":{\"nested\":{}},\"c7\":{\"nested\":{}}," +
-                "\"c8\":{\"nested\":{}},\"c9\":{\"nested\":{\"nested2\":\"value\"}}," +
-                "\"c10\":{\"nested\":{}},\"c11\":{\"nested\":{}}}";
-        /*
+        filter.transaction(config, schema, new Control()
         {
-          "c1": "value",
-          "c2": null,
-          "c3": {},
-          "c4": {
-            "nested": "value"
-          },
-          "c5": {
-            "nested": null
-          },
-          "c6": {
-            "nested": {}
-          },
-          "c7": {
-            "nested": {
+            @Override
+            public void run(TaskSource taskSource, Schema outputSchema)
+            {
+                String jsonData = "{\"c1\":\"value\",\"c2\":null,\"c3\":{}," +
+                        "\"c4\":{\"nested\":\"value\"},\"c5\":{\"nested\":null}," +
+                        "\"c6\":{\"nested\":{}},\"c7\":{\"nested\":{\"nested\":null}}," +
+                        "\"c8\":{\"nested\":{\"nested\":\"value\"}},\"c9\":{\"nested\":{\"nested\":\"value\",\"nested2\":\"value\"}}," +
+                        "\"c10\":{\"nested\":{\"nested\":{}}},\"c11\":{\"nested\":{\"nested\":{\"nested\":{}}}}}";
+                /*
+                {
+                  "c1": "value",
+                  "c2": null,
+                  "c3": {},
+                  "c4": {
+                    "nested": "value"
+                  },
+                  "c5": {
+                    "nested": null
+                  },
+                  "c6": {
+                    "nested": {}
+                  },
+                  "c7": {
+                    "nested": {
+                      "nested": null
+                    }
+                  },
+                  "c8": {
+                    "nested": {
+                      "nested": "value"
+                    }
+                  },
+                  "c9": {
+                    "nested": {
+                      "nested": "value",
+                      "nested2": "value"
+                    }
+                  },
+                  "c10": {
+                    "nested": {
+                      "nested": {}
+                    }
+                  },
+                  "c11": {
+                    "nested": {
+                      "nested": {
+                        "nested": {}
+                      }
+                    }
+                  }
+                }
+                 */
+                String expected = "{\"c1\":\"value\",\"c2\":null,\"c3\":{}," +
+                        "\"c4\":{\"nested\":\"value\"},\"c5\":{\"nested\":null}," +
+                        "\"c6\":{\"nested\":{}},\"c7\":{\"nested\":{}}," +
+                        "\"c8\":{\"nested\":{}},\"c9\":{\"nested\":{\"nested2\":\"value\"}}," +
+                        "\"c10\":{\"nested\":{}},\"c11\":{\"nested\":{}}}";
+                /*
+                {
+                  "c1": "value",
+                  "c2": null,
+                  "c3": {},
+                  "c4": {
+                    "nested": "value"
+                  },
+                  "c5": {
+                    "nested": null
+                  },
+                  "c6": {
+                    "nested": {}
+                  },
+                  "c7": {
+                    "nested": {
+                    }
+                  },
+                  "c8": {
+                    "nested": {
+                    }
+                  },
+                  "c9": {
+                    "nested": {
+                      "nested2": "value"
+                    }
+                  },
+                  "c10": {
+                    "nested": {
+                    }
+                  },
+                  "c11": {
+                    "nested": {
+                    }
+                  }
+                }
+                */
+                assertJsonMy(taskSource, expected, jsonData);
             }
-          },
-          "c8": {
-            "nested": {
-            }
-          },
-          "c9": {
-            "nested": {
-              "nested2": "value"
-            }
-          },
-          "c10": {
-            "nested": {
-            }
-          },
-          "c11": {
-            "nested": {
-            }
-          }
-        }
-        */
-        JSONAssert.assertEquals(expected, filter.doFilter(jsonData), true);
+        });
     }
 }
