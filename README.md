@@ -17,7 +17,7 @@ Filtering keys from JSON objects.
   - **key**: key name to add (string)
   - **value**: value of the key (anything)
 - **drop_keys**: JSON keys to drop (array of string, optional)
-  - **key**: key name to add (string)
+  - **key**: key name to drop (string)
   
 ## Example Config
 
